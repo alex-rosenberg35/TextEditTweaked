@@ -1,19 +1,11 @@
 /*
-        Preferences.m
-        Copyright (c) 1995-2005 by Apple Computer, Inc., all rights reserved.
-        Author: Ali Ozer
+    Preferences.m
+    Copyright (c) 1995-2009 by Apple Computer, Inc., all rights reserved.
+    Author: Ali Ozer
 
-        Preferences controller. To add new defaults search for one
-        of the existing keys. Some keys have UI, others don't; 
-        use one similar to the one you're adding.
-
-        displayedValues is a mirror of the UI. These are committed by copying
-        these values to curValues.
-
-        This module allows for UI where there is or there isn't an OK button. 
-        If you wish to have an OK button, connect OK to ok:,
-        Revert to revert:, and don't call commitDisplayedValues from the 
-        various action messages. 
+    Preferences controller, subclass of NSWindowController. Since the switch to a bindings-based preferences interface, the class has become a lot simpler; its only duties now are to manage the user fonts for rich and plain text documents, translate HTML saving options from backwards-compatible defaults values into pop-up menu item tags, and revert everything to the initial defaults if the user so chooses.
+ 
+    The Preferences instance also acts as a delegate for the window, in order to validate edits before it closes, and for the two text fields bound to the window size in characters, so that invalid entries trigger a reset to a field's previous value.
 */
 /*
  IMPORTANT:  This Apple software is supplied to you by Apple Computer, Inc. ("Apple") in
@@ -51,355 +43,161 @@
 #import <Cocoa/Cocoa.h>
 #import "Preferences.h"
 #import "EncodingManager.h"
-
-static NSDictionary *defaultValues() {
-    static NSDictionary *dict = nil;
-    if (!dict) {
-        dict = [[NSDictionary alloc] initWithObjectsAndKeys:
-                [NSNumber numberWithBool:YES], DeleteBackup, 
-                [NSNumber numberWithBool:NO], SaveFilesWritable, 
-                [NSNumber numberWithBool:NO], OverwriteReadOnlyFiles, 
-                [NSNumber numberWithBool:YES], RichText, 
-                [NSNumber numberWithBool:NO], ShowPageBreaks,
-		[NSNumber numberWithBool:NO], OpenPanelFollowsMainWindow,
-		[NSNumber numberWithBool:YES], AddExtensionToNewPlainTextFiles,
-                [NSNumber numberWithInt:75], WindowWidth, 
-                [NSNumber numberWithInt:30], WindowHeight, 
-                [NSNumber numberWithInt:NoStringEncoding], PlainTextEncodingForRead,
-                [NSNumber numberWithInt:NoStringEncoding], PlainTextEncodingForWrite,
-		[NSNumber numberWithInt:8], TabWidth,
-		[NSNumber numberWithInt:50000], ForegroundLayoutToIndex,       
-                [NSFont userFixedPitchFontOfSize:0.0], PlainTextFont, 
-                [NSFont userFontOfSize:0.0], RichTextFont, 
-                [NSNumber numberWithBool:NO], IgnoreRichText,
-		[NSNumber numberWithBool:NO], IgnoreHTML,
-                [NSNumber numberWithBool:YES], CheckSpellingAsYouType,
-                [NSNumber numberWithBool:YES], ShowRuler,
-                [NSNumber numberWithBool:NO], NumberPagesWhenPrinting,
-                @"", AuthorProperty,
-                @"", CompanyProperty,
-                @"", CopyrightProperty,
-                [NSNumber numberWithBool:NO], UseXHTMLDocType,
-                [NSNumber numberWithBool:NO], UseTransitionalDocType,
-                [NSNumber numberWithBool:YES], UseEmbeddedCSS,
-                [NSNumber numberWithBool:NO], UseInlineCSS,
-                [NSNumber numberWithInt:NSUTF8StringEncoding], HTMLEncoding,
-                [NSNumber numberWithBool:YES], PreserveWhitespace,
-		nil];
-    }
-    return dict;
-}
+#import "FontNameTransformer.h"
+#import "TextEditDefaultsKeys.h"
 
 @implementation Preferences
 
-static Preferences *sharedInstance = nil;
-
-+ (Preferences *)sharedInstance {
-    return sharedInstance ? sharedInstance : [[self alloc] init];
-}
-
 - (id)init {
-    if (sharedInstance) {		// We just have one instance of the Preferences class, return that one instead
-        [self release];
-    } else if (self = [super init]) {
-        curValues = [[[self class] preferencesFromDefaults] copyWithZone:[self zone]];
-        origValues = [curValues retain];
-        [self discardDisplayedValues];
-        sharedInstance = self;
+    return [super initWithWindowNibName:@"Preferences"];
+}
+
+- (void)windowDidLoad {
+    NSWindow *window = [self window];
+    [window setHidesOnDeactivate:NO];
+    [window setExcludedFromWindowsMenu:YES];
+}
+
+#pragma mark *** Font changing code ***
+
+- (IBAction)changeRichTextFont:(id)sender {
+    // validate whatever's currently being edited first
+    if ([[self window] makeFirstResponder:nil]) {
+        changingRTFFont = YES;
+        NSFontManager *fontManager = [NSFontManager sharedFontManager];
+        [fontManager setSelectedFont:[self richTextFont] isMultiple:NO];
+        [fontManager orderFrontFontPanel:self];
     }
-    return sharedInstance;
 }
 
-- (void)dealloc {
-    if (self != sharedInstance) [super dealloc];	// Don't free the shared instance
-}
-
-
-/* The next few factory methods are conveniences, working on the shared instance
-*/
-+ (id)objectForKey:(id)key {
-    return [[[self sharedInstance] preferences] objectForKey:key];
-}
-
-+ (void)saveDefaults {
-    [[self sharedInstance] saveDefaults];
-}
-
-- (void)saveDefaults {
-    NSDictionary *prefs = [self preferences];
-    if (![origValues isEqual:prefs]) [Preferences savePreferencesToDefaults:prefs];
-}
-
-- (NSDictionary *)preferences {
-    return curValues;
-}
-
-- (void)showPanel:(id)sender {
-    if (!panel) {
-        if (![NSBundle loadNibNamed:@"Preferences" owner:self])  {
-            NSLog(@"Failed to load Preferences.nib");
-            NSBeep();
-            return;
-        }
-	[panel setHidesOnDeactivate:NO];
-	[panel setExcludedFromWindowsMenu:YES];
-	[panel setMenu:nil];
-        [self updateUI];
-        [panel center];
+- (IBAction)changePlainTextFont:(id)sender {
+    // validate whatever's currently being edited first
+    if ([[self window] makeFirstResponder:nil]) {
+        changingRTFFont = NO;    
+        NSFontManager *fontManager = [NSFontManager sharedFontManager];
+        [fontManager setSelectedFont:[self plainTextFont] isMultiple:NO];
+        [fontManager orderFrontFontPanel:self];
     }
-    [panel makeKeyAndOrderFront:nil];
-}
-
-static void showFontInField(NSFont *font, NSTextField *field) {
-    [field setStringValue:font ? [NSString stringWithFormat:@"%@ %g", [font displayName], [font pointSize]] : @""];
-}
-
-- (void)updateUI {
-    if (!richTextFontNameField) return;	/* UI hasn't been loaded... */
-
-    showFontInField([displayedValues objectForKey:RichTextFont], richTextFontNameField);
-    showFontInField([displayedValues objectForKey:PlainTextFont], plainTextFontNameField);
-
-    [deleteBackupButton setState:[[displayedValues objectForKey:DeleteBackup] boolValue] ? 1 : 0];
-    [saveFilesWritableButton setState:[[displayedValues objectForKey:SaveFilesWritable] boolValue]];
-    [overwriteReadOnlyFilesButton setState:[[displayedValues objectForKey:OverwriteReadOnlyFiles] boolValue]];
-    [addExtensionToNewPlainTextFilesButton setState:[[displayedValues objectForKey:AddExtensionToNewPlainTextFiles] boolValue]];
-    [richTextMatrix selectCellWithTag:[[displayedValues objectForKey:RichText] boolValue] ? 1 : 0];
-    [showPageBreaksButton setState:[[displayedValues objectForKey:ShowPageBreaks] boolValue]];
-    [ignoreRichTextButton setState:[[displayedValues objectForKey:IgnoreRichText] boolValue]];
-    [ignoreHTMLButton setState:[[displayedValues objectForKey:IgnoreHTML] boolValue]];
-    [checkSpellingAsYouTypeButton setState:[[displayedValues objectForKey:CheckSpellingAsYouType] boolValue]];
-    [showRulerButton setState:[[displayedValues objectForKey:ShowRuler] boolValue]];
-    [numberPagesWhenPrintingButton setState:[[displayedValues objectForKey:NumberPagesWhenPrinting] boolValue]];
-
-    [windowWidthField setIntValue:[[displayedValues objectForKey:WindowWidth] intValue]];
-    [windowHeightField setIntValue:[[displayedValues objectForKey:WindowHeight] intValue]];
-
-    [authorPropertyField setStringValue:[displayedValues objectForKey:AuthorProperty]];
-    [companyPropertyField setStringValue:[displayedValues objectForKey:CompanyProperty]];
-    [copyrightPropertyField setStringValue:[displayedValues objectForKey:CopyrightProperty]];
-
-    [(EncodingPopUpButton *)plainTextEncodingForReadPopup setEncoding:[[displayedValues objectForKey:PlainTextEncodingForRead] intValue] defaultEntry:YES];
-    [(EncodingPopUpButton *)plainTextEncodingForWritePopup setEncoding:[[displayedValues objectForKey:PlainTextEncodingForWrite] intValue] defaultEntry:YES];
-
-    [HTMLDocumentTypePopUp selectItemAtIndex:([[displayedValues objectForKey:UseXHTMLDocType] boolValue] ? 2 : 0) | ([[displayedValues objectForKey:UseTransitionalDocType] boolValue] ? 1 : 0)];
-    [HTMLStylingPopUp selectItemAtIndex:[[displayedValues objectForKey:UseEmbeddedCSS] boolValue] ? 0 : ([[displayedValues objectForKey:UseInlineCSS] boolValue] ? 1 : 2)];
-    [(EncodingPopUpButton *)HTMLEncodingPopUp setEncoding:[[displayedValues objectForKey:HTMLEncoding] intValue] defaultEntry:NO];
-    [preserveWhiteSpaceButton setState:[[displayedValues objectForKey:PreserveWhitespace] boolValue]];
-}
-
-/* Gets everything from UI except for fonts...
-*/
-- (void)miscChanged:(id)sender {
-    static NSNumber *yes = nil;
-    static NSNumber *no = nil;
-    int anInt;
-    
-    if (!yes) {
-        yes = [[NSNumber alloc] initWithBool:YES];
-        no = [[NSNumber alloc] initWithBool:NO];
-    }
-
-    [displayedValues setObject:[deleteBackupButton state] ? yes : no forKey:DeleteBackup];
-    [displayedValues setObject:[[richTextMatrix selectedCell] tag] ? yes : no forKey:RichText];
-    [displayedValues setObject:[saveFilesWritableButton state] ? yes : no forKey:SaveFilesWritable];
-    [displayedValues setObject:[overwriteReadOnlyFilesButton state] ? yes : no forKey:OverwriteReadOnlyFiles];
-    [displayedValues setObject:[addExtensionToNewPlainTextFilesButton state] ? yes : no forKey:AddExtensionToNewPlainTextFiles];
-    [displayedValues setObject:[showPageBreaksButton state] ? yes : no forKey:ShowPageBreaks];
-    [displayedValues setObject:[NSNumber numberWithInt:[[plainTextEncodingForReadPopup selectedItem] tag]] forKey:PlainTextEncodingForRead];
-    [displayedValues setObject:[NSNumber numberWithInt:[[plainTextEncodingForWritePopup selectedItem] tag]] forKey:PlainTextEncodingForWrite];
-    [displayedValues setObject:[ignoreRichTextButton state] ? yes : no forKey:IgnoreRichText];
-    [displayedValues setObject:[ignoreHTMLButton state] ? yes : no forKey:IgnoreHTML];
-    [displayedValues setObject:[checkSpellingAsYouTypeButton state] ? yes : no forKey:CheckSpellingAsYouType];
-    [displayedValues setObject:[showRulerButton state] ? yes : no forKey:ShowRuler];
-    [displayedValues setObject:[numberPagesWhenPrintingButton state] ? yes : no forKey:NumberPagesWhenPrinting];
-    [displayedValues setObject:[authorPropertyField stringValue] forKey:AuthorProperty];
-    [displayedValues setObject:[companyPropertyField stringValue] forKey:CompanyProperty];
-    [displayedValues setObject:[copyrightPropertyField stringValue] forKey:CopyrightProperty];
-    [displayedValues setObject:([HTMLDocumentTypePopUp indexOfSelectedItem] & 2) ? yes : no forKey:UseXHTMLDocType];
-    [displayedValues setObject:([HTMLDocumentTypePopUp indexOfSelectedItem] & 1) ? yes : no forKey:UseTransitionalDocType];
-    [displayedValues setObject:([HTMLStylingPopUp indexOfSelectedItem] == 0) ? yes : no forKey:UseEmbeddedCSS];
-    [displayedValues setObject:([HTMLStylingPopUp indexOfSelectedItem] == 1) ? yes : no forKey:UseInlineCSS];
-    [displayedValues setObject:[NSNumber numberWithInt:[[HTMLEncodingPopUp selectedItem] tag]] forKey:HTMLEncoding];
-    [displayedValues setObject:[preserveWhiteSpaceButton state] ? yes : no forKey:PreserveWhitespace];
-
-    if ((anInt = [windowWidthField intValue]) < 1 || anInt > 10000) {
-        if ((anInt = [[displayedValues objectForKey:WindowWidth] intValue]) < 1 || anInt > 10000) anInt = [[defaultValues() objectForKey:WindowWidth] intValue];
-	[windowWidthField setIntValue:anInt];
-    } else {
-	[displayedValues setObject:[NSNumber numberWithInt:anInt] forKey:WindowWidth];
-    }
-
-    if ((anInt = [windowHeightField intValue]) < 1 || anInt > 10000) {
-        if ((anInt = [[displayedValues objectForKey:WindowHeight] intValue]) < 1 || anInt > 10000) anInt = [[defaultValues() objectForKey:WindowHeight] intValue];
-        [windowHeightField setIntValue:[[displayedValues objectForKey:WindowHeight] intValue]];
-    } else {
-	[displayedValues setObject:[NSNumber numberWithInt:anInt] forKey:WindowHeight];
-    }
-
-    [self commitDisplayedValues];
-}
-
-/**** Font changing code ****/
-
-static BOOL changingRTFFont = NO;
-
-- (void)changeRichTextFont:(id)sender {
-    changingRTFFont = YES;
-    [panel makeFirstResponder:panel];
-    [[NSFontManager sharedFontManager] setSelectedFont:[curValues objectForKey:RichTextFont] isMultiple:NO];
-    [[NSFontManager sharedFontManager] orderFrontFontPanel:self];
-}
-
-- (void)changePlainTextFont:(id)sender {
-    changingRTFFont = NO;
-    [panel makeFirstResponder:panel];
-    [[NSFontManager sharedFontManager] setSelectedFont:[curValues objectForKey:PlainTextFont] isMultiple:NO];
-    [[NSFontManager sharedFontManager] orderFrontFontPanel:self];
 }
 
 - (void)changeFont:(id)fontManager {
     if (changingRTFFont) {
-        [displayedValues setObject:[fontManager convertFont:[curValues objectForKey:RichTextFont]] forKey:RichTextFont];
-        showFontInField([displayedValues objectForKey:RichTextFont], richTextFontNameField);
+        [self setRichTextFont:[fontManager convertFont:[self richTextFont]]];
     } else {
-        [displayedValues setObject:[fontManager convertFont:[curValues objectForKey:PlainTextFont]] forKey:PlainTextFont];
-        showFontInField([displayedValues objectForKey:PlainTextFont], plainTextFontNameField);
-    }
-    [self commitDisplayedValues];
-}
-
-/**** Commit/revert etc ****/
-
-- (void)commitDisplayedValues {
-    if (curValues != displayedValues) {
-        [curValues release];
-        curValues = [displayedValues copyWithZone:[self zone]];
+        [self setPlainTextFont:[fontManager convertFont:[self plainTextFont]]];
     }
 }
 
-- (void)discardDisplayedValues {
-    if (curValues != displayedValues) {
-        [displayedValues release];
-        displayedValues = [curValues mutableCopyWithZone:[self zone]];
-        [self updateUI];
-    }
+- (void)setRichTextFont:(NSFont *)newFont {
+    [NSFont setUserFont:newFont];
 }
 
-- (void)ok:(id)sender {
-    [self commitDisplayedValues];
+- (void)setPlainTextFont:(NSFont *)newFont {
+    [NSFont setUserFixedPitchFont:newFont];
 }
 
-- (void)revertToDefault:(id)sender {
-    curValues = [defaultValues() copyWithZone:[self zone]];
-    [self discardDisplayedValues];
+- (NSFont *)richTextFont {
+    return [NSFont userFontOfSize:0.0];
 }
 
-- (void)revert:(id)sender {
-    [self discardDisplayedValues];
+- (NSFont *)plainTextFont {
+    return [NSFont userFixedPitchFontOfSize:0.0];
 }
 
-/**** Code to deal with defaults ****/
-   
-#define getStringDefault(name) \
-  {id obj = [defaults stringForKey:name]; \
-      [dict setObject:obj ? obj : [defaultValues() objectForKey:name] forKey:name];}
+#pragma mark *** HTML document type and styling code ***
 
-#define getBoolDefault(name) \
-  {id obj = [defaults objectForKey:name]; \
-      [dict setObject:obj ? [NSNumber numberWithBool:[defaults boolForKey:name]] : [defaultValues() objectForKey:name] forKey:name];}
-
-#define getIntDefault(name) \
-  {id obj = [defaults objectForKey:name]; \
-      [dict setObject:obj ? [NSNumber numberWithInt:[defaults integerForKey:name]] : [defaultValues() objectForKey:name] forKey:name];}
-
-+ (NSDictionary *)preferencesFromDefaults {
+/* The user chooses the HTML document type using a popup button, but the actual type is represented as a two-bit bitfield, where one bit represents whether or not to use a transitional DTD and another bit determines whether or not to use XHTML. The popup button uses the bitfield's integer value as its tag.
+ */
+- (HTMLDocumentTypeOptions)HTMLDocumentType {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithCapacity:10];
-
-    getBoolDefault(RichText);
-    getBoolDefault(DeleteBackup);
-    getBoolDefault(ShowPageBreaks);
-    getBoolDefault(SaveFilesWritable);
-    getBoolDefault(OverwriteReadOnlyFiles);
-    getBoolDefault(OpenPanelFollowsMainWindow);
-    getBoolDefault(AddExtensionToNewPlainTextFiles);
-    getIntDefault(WindowWidth);
-    getIntDefault(WindowHeight);
-    getIntDefault(PlainTextEncodingForRead);
-    getIntDefault(PlainTextEncodingForWrite);
-    getIntDefault(TabWidth);
-    getIntDefault(ForegroundLayoutToIndex);
-    getBoolDefault(IgnoreRichText);
-    getBoolDefault(IgnoreHTML);
-    getBoolDefault(CheckSpellingAsYouType);
-    getBoolDefault(ShowRuler);
-    getBoolDefault(NumberPagesWhenPrinting);
-    getStringDefault(AuthorProperty);
-    getStringDefault(CompanyProperty);
-    getStringDefault(CopyrightProperty);
-    getBoolDefault(UseXHTMLDocType);
-    getBoolDefault(UseTransitionalDocType);
-    getBoolDefault(UseEmbeddedCSS);
-    getBoolDefault(UseInlineCSS);
-    getIntDefault(HTMLEncoding);
-    getBoolDefault(PreserveWhitespace);
-    [dict setObject:[NSFont userFontOfSize:0.0] forKey:RichTextFont];
-    [dict setObject:[NSFont userFixedPitchFontOfSize:0.0] forKey:PlainTextFont];
-
-    return dict;
+    HTMLDocumentTypeOptions type = 0;
+    
+    if ([defaults boolForKey:UseXHTMLDocType]) type |= HTMLDocumentTypeOptionUseXHTML;
+    if ([defaults boolForKey:UseTransitionalDocType]) type |= HTMLDocumentTypeOptionUseTransitional;
+    
+    return type;
 }
 
-#define setStringDefault(name) \
-  {if ([[defaultValues() objectForKey:name] isEqual:[dict objectForKey:name]]) [defaults removeObjectForKey:name]; else [defaults setObject:[dict objectForKey:name] forKey:name];}
-
-#define setBoolDefault(name) \
-  {if ([[defaultValues() objectForKey:name] isEqual:[dict objectForKey:name]]) [defaults removeObjectForKey:name]; else [defaults setBool:[[dict objectForKey:name] boolValue] forKey:name];}
-
-#define setIntDefault(name) \
-  {if ([[defaultValues() objectForKey:name] isEqual:[dict objectForKey:name]]) [defaults removeObjectForKey:name]; else [defaults setInteger:[[dict objectForKey:name] intValue] forKey:name];}
-
-+ (void)savePreferencesToDefaults:(NSDictionary *)dict {
+- (void)setHTMLDocumentType:(HTMLDocumentTypeOptions)newType {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    setBoolDefault(RichText);
-    setBoolDefault(DeleteBackup);
-    setBoolDefault(ShowPageBreaks);
-    setBoolDefault(SaveFilesWritable);
-    setBoolDefault(OverwriteReadOnlyFiles);
-    setBoolDefault(OpenPanelFollowsMainWindow);
-    setBoolDefault(AddExtensionToNewPlainTextFiles);
-    setIntDefault(WindowWidth);
-    setIntDefault(WindowHeight);
-    setIntDefault(PlainTextEncodingForRead);
-    setIntDefault(PlainTextEncodingForWrite);
-    setIntDefault(TabWidth);
-    setIntDefault(ForegroundLayoutToIndex);
-    setBoolDefault(IgnoreRichText);
-    setBoolDefault(IgnoreHTML);
-    setBoolDefault(CheckSpellingAsYouType);
-    setBoolDefault(ShowRuler);
-    setBoolDefault(NumberPagesWhenPrinting);
-    setStringDefault(AuthorProperty);
-    setStringDefault(CompanyProperty);
-    setStringDefault(CopyrightProperty);
-    setBoolDefault(UseXHTMLDocType);
-    setBoolDefault(UseTransitionalDocType);
-    setBoolDefault(UseEmbeddedCSS);
-    setBoolDefault(UseInlineCSS);
-    setIntDefault(HTMLEncoding);
-    setBoolDefault(PreserveWhitespace);
-    if (![[dict objectForKey:RichTextFont] isEqual:[NSFont userFontOfSize:0.0]]) [NSFont setUserFont:[dict objectForKey:RichTextFont]];
-    if (![[dict objectForKey:PlainTextFont] isEqual:[NSFont userFixedPitchFontOfSize:0.0]]) [NSFont setUserFixedPitchFont:[dict objectForKey:PlainTextFont]];
+    
+    [defaults setBool:((newType & HTMLDocumentTypeOptionUseXHTML) == HTMLDocumentTypeOptionUseXHTML) forKey:UseXHTMLDocType];
+    [defaults setBool:((newType & HTMLDocumentTypeOptionUseTransitional) == HTMLDocumentTypeOptionUseTransitional) forKey:UseTransitionalDocType];
 }
 
+/* The style mode is how style information is encoded when saving HTML: using embedded or inline CSS, or using older HTML tags and attributes. For backwards compatibility this information is stored in user defaults as two boolean values, rather than a style mode name or enumerated integer value.
+ */
+- (HTMLStylingMode)HTMLStylingMode {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    
+    if ([defaults boolForKey:UseEmbeddedCSS]) {
+        return HTMLStylingUseEmbeddedCSS;
+    } else if ([defaults boolForKey:UseInlineCSS]) {
+        return HTMLStylingUseInlineCSS;
+    } else {
+        return HTMLStylingUseNoCSS;
+    }
+}
 
-/**** Window delegation ****/
+- (void)setHTMLStylingMode:(HTMLStylingMode)newMode {
+    BOOL useEmbedded = NO;
+    BOOL useInline = NO;
+    
+    switch (newMode) {
+        case HTMLStylingUseEmbeddedCSS:
+            useEmbedded = YES;
+            break;
+        case HTMLStylingUseInlineCSS:
+            useInline = YES;
+            break;
+            // ignore default case
+    }
+    
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setBool:useEmbedded forKey:UseEmbeddedCSS];
+    [defaults setBool:useInline forKey:UseInlineCSS];
+}
 
-// We do this to catch the case where the user enters a value into one of the text fields but closes the window without hitting enter or tab.
+#pragma mark *** Reverting to defaults ***
 
-- (void)windowWillClose:(NSNotification *)notification {
-    NSWindow *window = [notification object];
-    (void)[window makeFirstResponder:window];
+- (IBAction)revertToDefault:(id)sender {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    
+    [self willChangeValueForKey:@"HTMLDocumentType"];
+    [defaults removeObjectForKey:UseXHTMLDocType];
+    [defaults removeObjectForKey:UseTransitionalDocType];
+    [self didChangeValueForKey:@"HTMLDocumentType"];
+    
+    [self willChangeValueForKey:@"HTMLStylingMode"];
+    [defaults removeObjectForKey:UseEmbeddedCSS];
+    [defaults removeObjectForKey:UseInlineCSS];
+    [self didChangeValueForKey:@"HTMLStylingMode"];
+    
+    [self setRichTextFont:nil];
+    [self setPlainTextFont:nil];
+    
+    [[NSUserDefaultsController sharedUserDefaultsController] revertToInitialValues:nil];    // For the rest of the defaults
+}
+
+#pragma mark *** Window delegation ***
+
+/* We do this to catch the case where the user enters a value into one of the text fields but closes the window without hitting enter or tab.
+ */
+- (BOOL)windowShouldClose:(NSWindow *)window {
+    return [window makeFirstResponder:nil]; // validate editing
+}
+
+#pragma mark *** Window size field delegation ***
+
+- (void)controlTextDidBeginEditing:(NSNotification *)note {
+    originalDimensionFieldValue = [[note object] integerValue];
+}
+
+/* Handle the case when the user enters a ridiculous value for the window size. We just set it back to what it started as.
+ */
+- (BOOL)control:(NSControl *)control didFailToFormatString:(NSString *)string errorDescription:(NSString *)error {
+    [control setIntegerValue:originalDimensionFieldValue];
+    return YES;
 }
 
 

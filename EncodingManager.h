@@ -4,12 +4,13 @@ enum {
     NoStringEncoding = 0xFFFFFFFF
 };
 
+enum {
+    WantsAutomaticTag = -1
+};
 
-@interface EncodingPopUpButton : NSPopUpButton {
-    NSStringEncoding defaultEncoding;
-    BOOL hasDefaultEntry;
+
+@interface EncodingPopUpButtonCell : NSPopUpButtonCell {
 }
-- (void)setEncoding:(NSStringEncoding)encoding defaultEntry:(BOOL)flag;
 @end
 
 
@@ -30,7 +31,7 @@ enum {
 
 /* Empties then initializes the supplied popup with the supported encodings.
 */
-- (void)setupPopUp:(EncodingPopUpButton *)button selectedEncoding:(unsigned)selectedEncoding withDefaultEntry:(BOOL)flag;
+- (void)setupPopUpCell:(EncodingPopUpButtonCell *)button selectedEncoding:(NSStringEncoding)selectedEncoding withDefaultEntry:(BOOL)includeDefaultItem;
 
 /* Action methods for bringing up and dealing with changes in the encodings list panel
 */

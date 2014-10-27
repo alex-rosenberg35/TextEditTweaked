@@ -1,6 +1,6 @@
 /*
         MultiplePageView.m
-        Copyright (c) 1995-2005 by Apple Computer, Inc., all rights reserved.
+        Copyright (c) 1995-2009 by Apple Computer, Inc., all rights reserved.
         Author: Ali Ozer
 
         View which holds all the pages together in the multiple-page case
@@ -41,6 +41,7 @@
 #import <Cocoa/Cocoa.h>
 #import "MultiplePageView.h"
 #import "Document.h"	// For defaultTextPadding();
+#import "TextEditMisc.h"
 
 @implementation MultiplePageView
 
@@ -87,7 +88,7 @@
     return printInfo;
 }
 
-- (void)setNumberOfPages:(unsigned)num {
+- (void)setNumberOfPages:(NSUInteger)num {
     if (numPages != num) {
 	NSRect oldFrame = [self frame];
         NSRect newFrame;
@@ -100,11 +101,11 @@
     }
 }
 
-- (unsigned)numberOfPages {
+- (NSUInteger)numberOfPages {
     return numPages;
 }
     
-- (float)pageSeparatorHeight {
+- (CGFloat)pageSeparatorHeight {
     return 5.0;
 }
 
@@ -120,7 +121,7 @@
     return paperSize;
 }
 
-- (NSRect)documentRectForPageNumber:(unsigned)pageNumber {	/* First page is page 0, of course! */
+- (NSRect)documentRectForPageNumber:(NSUInteger)pageNumber {	/* First page is page 0, of course! */
     NSRect rect = [self pageRectForPageNumber:pageNumber];
     rect.origin.x += [printInfo leftMargin] - defaultTextPadding();
     rect.origin.y += [printInfo topMargin];
@@ -128,7 +129,7 @@
     return rect;
 }
 
-- (NSRect)pageRectForPageNumber:(unsigned)pageNumber {
+- (NSRect)pageRectForPageNumber:(NSUInteger)pageNumber {
     NSRect rect;
     rect.size = [printInfo paperSize];
     rect.origin = [self frame].origin;
@@ -163,9 +164,9 @@
 - (void)drawRect:(NSRect)rect {
     if ([[NSGraphicsContext currentContext] isDrawingToScreen]) {
         NSSize paperSize = [printInfo paperSize];
-        unsigned firstPage = rect.origin.y / (paperSize.height + [self pageSeparatorHeight]);
-        unsigned lastPage = NSMaxY(rect) / (paperSize.height + [self pageSeparatorHeight]);
-        unsigned cnt;
+        NSUInteger firstPage = rect.origin.y / (paperSize.height + [self pageSeparatorHeight]);
+        NSUInteger lastPage = NSMaxY(rect) / (paperSize.height + [self pageSeparatorHeight]);
+        NSUInteger cnt;
         
         [marginColor set];
         NSRectFill(rect);
@@ -195,8 +196,15 @@
     return YES;
 }
 
-- (NSRect)rectForPage:(int)page {
+- (NSRect)rectForPage:(NSInteger)page {
     return [self documentRectForPageNumber:page-1];  /* Our page numbers start from 0; the kit's from 1 */
+}
+
+/* This method makes sure that we center the view on the page. By default, the text view "bleeds" into the margins by defaultTextPadding() as a way to provide padding around the editing area. If we don't do anything special, the text view appears at the margin, which causes the text to be offset on the page by defaultTextPadding(). This method makes sure the text is centered.
+*/
+- (NSPoint)locationOfPrintRect:(NSRect)rect {
+    NSSize paperSize = [printInfo paperSize];
+    return NSMakePoint((paperSize.width - rect.size.width) / 2.0, (paperSize.height - rect.size.height) / 2.0);
 }
 
 @end

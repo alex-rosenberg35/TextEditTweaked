@@ -1,6 +1,6 @@
 /*
         ScalingScrollView.m
-        Copyright (c) 1995-2005 by Apple Computer, Inc., all rights reserved.
+        Copyright (c) 1995-2009 by Apple Computer, Inc., all rights reserved.
         Author: Mike Ferris
 */
 /*
@@ -53,9 +53,9 @@
     NSLocalizedStringFromTable(@"1600%", @"ZoomValues", @"Zoom popup entry")
 */   
 static NSString *_NSDefaultScaleMenuLabels[] = {/* @"Set...", */ @"10%", @"25%", @"50%", @"75%", @"100%", @"125%", @"150%", @"200%", @"400%", @"800%", @"1600%"};
-static float _NSDefaultScaleMenuFactors[] = {/* 0.0, */ 0.1, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 4.0, 8.0, 16.0};
-static unsigned _NSDefaultScaleMenuSelectedItemIndex = 4;
-static float _NSScaleMenuFontSize = 10.0;
+static const CGFloat _NSDefaultScaleMenuFactors[] = {/* 0.0, */ 0.1, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 4.0, 8.0, 16.0};
+static NSUInteger _NSDefaultScaleMenuSelectedItemIndex = 4;
+static const CGFloat _NSScaleMenuFontSize = 10.0;
 
 @implementation ScalingScrollView
 
@@ -68,7 +68,7 @@ static float _NSScaleMenuFontSize = 10.0;
 
 - (void)makeScalePopUpButton {
     if (_scalePopUpButton == nil) {
-        unsigned cnt, numberOfDefaultItems = (sizeof(_NSDefaultScaleMenuLabels) / sizeof(NSString *));
+        NSUInteger cnt, numberOfDefaultItems = (sizeof(_NSDefaultScaleMenuLabels) / sizeof(NSString *));
         id curItem;
 
         // create it
@@ -81,7 +81,7 @@ static float _NSScaleMenuFontSize = 10.0;
             [_scalePopUpButton addItemWithTitle:NSLocalizedStringFromTable(_NSDefaultScaleMenuLabels[cnt], @"ZoomValues", nil)];
             curItem = [_scalePopUpButton itemAtIndex:cnt];
             if (_NSDefaultScaleMenuFactors[cnt] != 0.0) {
-                [curItem setRepresentedObject:[NSNumber numberWithFloat:_NSDefaultScaleMenuFactors[cnt]]];
+                [curItem setRepresentedObject:[NSNumber numberWithDouble:_NSDefaultScaleMenuFactors[cnt]]];
             }
         }
         [_scalePopUpButton selectItemAtIndex:_NSDefaultScaleMenuSelectedItemIndex];
@@ -149,52 +149,60 @@ static float _NSScaleMenuFontSize = 10.0;
     }
 }
 
-- (void)scalePopUpAction:(id)sender {
+- (IBAction)scalePopUpAction:(id)sender {
     NSNumber *selectedFactorObject = [[sender selectedCell] representedObject];
     
     if (selectedFactorObject == nil) {
         NSLog(@"Scale popup action: setting arbitrary zoom factors is not yet supported.");
         return;
     } else {
-        [self setScaleFactor:[selectedFactorObject floatValue] adjustPopup:NO];
+        [self setScaleFactor:[selectedFactorObject doubleValue] adjustPopup:NO];
     }
 }
 
-- (float)scaleFactor {
+- (CGFloat)scaleFactor {
     return scaleFactor;
 }
 
-- (void)setScaleFactor:(float)newScaleFactor adjustPopup:(BOOL)flag {
+- (void)setScaleFactor:(CGFloat)newScaleFactor {
     if (scaleFactor != newScaleFactor) {
-	NSSize curDocFrameSize, newDocBoundsSize;
+	scaleFactor = newScaleFactor;
+
 	NSView *clipView = [[self documentView] superview];
 	
-        if (flag) {	// Coming from elsewhere, first validate it
-            unsigned cnt = 0, numberOfDefaultItems = (sizeof(_NSDefaultScaleMenuFactors) / sizeof(float));
-    
-            // We only work with some preset zoom values, so choose one of the appropriate values (Fudge a little for floating point == to work)
-            while (cnt < numberOfDefaultItems && newScaleFactor * .99 > _NSDefaultScaleMenuFactors[cnt]) cnt++;
-            if (cnt == numberOfDefaultItems) cnt--;
-            [_scalePopUpButton selectItemAtIndex:cnt];
-            scaleFactor = _NSDefaultScaleMenuFactors[cnt];
-        } else {
-            scaleFactor = newScaleFactor;
-        }
-	
 	// Get the frame.  The frame must stay the same.
-	curDocFrameSize = [clipView frame].size;
+	NSSize curDocFrameSize = [clipView frame].size;
 	
 	// The new bounds will be frame divided by scale factor
-	newDocBoundsSize.width = curDocFrameSize.width / scaleFactor;
-	newDocBoundsSize.height = curDocFrameSize.height / scaleFactor;
+	NSSize newDocBoundsSize = {curDocFrameSize.width / scaleFactor, curDocFrameSize.height / scaleFactor};
 	
 	[clipView setBoundsSize:newDocBoundsSize];
     }
+}
+
+- (void)setScaleFactor:(CGFloat)newScaleFactor adjustPopup:(BOOL)flag {
+    if (flag) {	// Coming from elsewhere, first validate it
+	NSUInteger cnt = 0, numberOfDefaultItems = (sizeof(_NSDefaultScaleMenuFactors) / sizeof(CGFloat));
+
+	// We only work with some preset zoom values, so choose one of the appropriate values (Fudge a little for floating point == to work)
+	while (cnt < numberOfDefaultItems && newScaleFactor * .99 > _NSDefaultScaleMenuFactors[cnt]) cnt++;
+	if (cnt == numberOfDefaultItems) cnt--;
+	[_scalePopUpButton selectItemAtIndex:cnt];
+	newScaleFactor = _NSDefaultScaleMenuFactors[cnt];
+    }
+    [self setScaleFactor:newScaleFactor];
 }
 
 - (void)setHasHorizontalScroller:(BOOL)flag {
     if (!flag) [self setScaleFactor:1.0 adjustPopup:NO];
     [super setHasHorizontalScroller:flag];
 }
+
+/* Reassure AppKit that ScalingScrollView supports live resize content preservation, even though it's a subclass that could have modified NSScrollView in such a way as to make NSScrollView's live resize content preservation support inoperative. By default this is disabled for NSScrollView subclasses.
+*/
+- (BOOL)preservesContentDuringLiveResize {
+    return [self drawsBackground];
+}
+
 
 @end

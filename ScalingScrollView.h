@@ -4,11 +4,11 @@
 
 @interface ScalingScrollView : NSScrollView {
     NSPopUpButton *_scalePopUpButton;
-    float scaleFactor;
+    CGFloat scaleFactor;
 }
 
-- (void)scalePopUpAction:(id)sender;
-- (void)setScaleFactor:(float)factor adjustPopup:(BOOL)flag;
-- (float)scaleFactor;
+- (IBAction)scalePopUpAction:(id)sender;
+- (void)setScaleFactor:(CGFloat)factor adjustPopup:(BOOL)flag;
+- (CGFloat)scaleFactor;
 
 @end

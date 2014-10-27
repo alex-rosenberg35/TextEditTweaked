@@ -1,43 +1,52 @@
+
 /*
-        Document.m
-        Copyright (c) 1995-2011 by Apple Computer, Inc., all rights reserved.
-        Author: David Remahl
+     File: DocumentController.m
+ Abstract: NSDocumentController subclass for TextEdit.
+ Required to support transient documents and customized Open panel.
  
-        NSDocumentController subclass for TextEdit
-        Required to support transient documents and customized Open panel
-*/
-/*
- IMPORTANT:  This Apple software is supplied to you by Apple Computer, Inc. ("Apple") in
- consideration of your agreement to the following terms, and your use, installation, 
- modification or redistribution of this Apple software constitutes acceptance of these 
- terms.  If you do not agree with these terms, please do not use, install, modify or 
+  Version: 1.8
+ 
+ Disclaimer: IMPORTANT:  This Apple software is supplied to you by Apple
+ Inc. ("Apple") in consideration of your agreement to the following
+ terms, and your use, installation, modification or redistribution of
+ this Apple software constitutes acceptance of these terms.  If you do
+ not agree with these terms, please do not use, install, modify or
  redistribute this Apple software.
  
- In consideration of your agreement to abide by the following terms, and subject to these 
- terms, Apple grants you a personal, non-exclusive license, under Apple's copyrights in 
- this original Apple software (the "Apple Software"), to use, reproduce, modify and 
- redistribute the Apple Software, with or without modifications, in source and/or binary 
- forms; provided that if you redistribute the Apple Software in its entirety and without 
- modifications, you must retain this notice and the following text and disclaimers in all 
- such redistributions of the Apple Software.  Neither the name, trademarks, service marks 
- or logos of Apple Computer, Inc. may be used to endorse or promote products derived from 
- the Apple Software without specific prior written permission from Apple. Except as expressly
- stated in this notice, no other rights or licenses, express or implied, are granted by Apple
- herein, including but not limited to any patent rights that may be infringed by your 
- derivative works or by other works in which the Apple Software may be incorporated.
+ In consideration of your agreement to abide by the following terms, and
+ subject to these terms, Apple grants you a personal, non-exclusive
+ license, under Apple's copyrights in this original Apple software (the
+ "Apple Software"), to use, reproduce, modify and redistribute the Apple
+ Software, with or without modifications, in source and/or binary forms;
+ provided that if you redistribute the Apple Software in its entirety and
+ without modifications, you must retain this notice and the following
+ text and disclaimers in all such redistributions of the Apple Software.
+ Neither the name, trademarks, service marks or logos of Apple Inc. may
+ be used to endorse or promote products derived from the Apple Software
+ without specific prior written permission from Apple.  Except as
+ expressly stated in this notice, no other rights or licenses, express or
+ implied, are granted by Apple herein, including but not limited to any
+ patent rights that may be infringed by your derivative works or by other
+ works in which the Apple Software may be incorporated.
  
- The Apple Software is provided by Apple on an "AS IS" basis.  APPLE MAKES NO WARRANTIES, 
- EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION THE IMPLIED WARRANTIES OF NON-INFRINGEMENT, 
- MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE, REGARDING THE APPLE SOFTWARE OR ITS 
- USE AND OPERATION ALONE OR IN COMBINATION WITH YOUR PRODUCTS.
+ The Apple Software is provided by Apple on an "AS IS" basis.  APPLE
+ MAKES NO WARRANTIES, EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION
+ THE IMPLIED WARRANTIES OF NON-INFRINGEMENT, MERCHANTABILITY AND FITNESS
+ FOR A PARTICULAR PURPOSE, REGARDING THE APPLE SOFTWARE OR ITS USE AND
+ OPERATION ALONE OR IN COMBINATION WITH YOUR PRODUCTS.
  
- IN NO EVENT SHALL APPLE BE LIABLE FOR ANY SPECIAL, INDIRECT, INCIDENTAL OR CONSEQUENTIAL 
- DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS 
- OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) ARISING IN ANY WAY OUT OF THE USE, 
- REPRODUCTION, MODIFICATION AND/OR DISTRIBUTION OF THE APPLE SOFTWARE, HOWEVER CAUSED AND 
- WHETHER UNDER THEORY OF CONTRACT, TORT (INCLUDING NEGLIGENCE), STRICT LIABILITY OR 
- OTHERWISE, EVEN IF APPLE HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-*/
+ IN NO EVENT SHALL APPLE BE LIABLE FOR ANY SPECIAL, INDIRECT, INCIDENTAL
+ OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ INTERRUPTION) ARISING IN ANY WAY OUT OF THE USE, REPRODUCTION,
+ MODIFICATION AND/OR DISTRIBUTION OF THE APPLE SOFTWARE, HOWEVER CAUSED
+ AND WHETHER UNDER THEORY OF CONTRACT, TORT (INCLUDING NEGLIGENCE),
+ STRICT LIABILITY OR OTHERWISE, EVEN IF APPLE HAS BEEN ADVISED OF THE
+ POSSIBILITY OF SUCH DAMAGE.
+ 
+ Copyright (C) 2013 Apple Inc. All Rights Reserved.
+ 
+ */
 
 #import "DocumentController.h"
 #import "Document.h"
@@ -91,7 +100,7 @@
         // We only expect to see plain-text, RTF, and RTFD at this point.
         NSString *docType = [attributes objectForKey:NSDocumentTypeDocumentAttribute];
         if ([docType isEqualToString:NSPlainTextDocumentType]) {
-            type = (NSString *)kUTTypePlainText;
+            type = (NSString *)kUTTypeText;
         } else if ([docType isEqualToString:NSRTFTextDocumentType]) {
             type = (NSString *)kUTTypeRTF;
         } else if ([docType isEqualToString:NSRTFDTextDocumentType]) {
@@ -118,7 +127,7 @@
             
             NSTextStorage *text = [doc textStorage];
             [text replaceCharactersInRange:NSMakeRange(0, [text length]) withAttributedString:string];
-            if ([[NSWorkspace sharedWorkspace] type:type conformsToType:(NSString *)kUTTypePlainText]) [doc applyDefaultTextAttributes:NO];
+            if ([type isEqualToString:(NSString *)kUTTypeText]) [doc applyDefaultTextAttributes:NO];
             
             [self addDocument:doc];
             [doc updateChangeCount:NSChangeReadOtherContents];
@@ -282,40 +291,42 @@
     return [owner->accessoryView autorelease];
 }
 
-/* To support selection of a fallback encoding, we override this method and add an accessory view.
+/* Overridden to add an accessory view to the open panel. This method is called for both modal and non-modal invocations.
 */
-- (NSInteger)runModalOpenPanel:(NSOpenPanel *)openPanel forTypes:(NSArray *)types {
+- (void)beginOpenPanel:(NSOpenPanel *)openPanel forTypes:(NSArray *)types completionHandler:(void (^)(NSInteger result))completionHandler {
     NSButton *ignoreRichTextButton;
     NSPopUpButton *encodingPopUp;
-    NSUInteger encoding;
-    BOOL ignoreHTML = [[NSUserDefaults standardUserDefaults] boolForKey:IgnoreHTML];
-    BOOL ignoreRich = [[NSUserDefaults standardUserDefaults] boolForKey:IgnoreRichText];
-    NSInteger result;
-    
+
+    BOOL ignoreHTMLOrig = [[NSUserDefaults standardUserDefaults] boolForKey:IgnoreHTML];
+    BOOL ignoreRichOrig = [[NSUserDefaults standardUserDefaults] boolForKey:IgnoreRichText];
     [openPanel setAccessoryView:[[self class] encodingAccessory:[[[NSUserDefaults standardUserDefaults] objectForKey:PlainTextEncodingForRead] unsignedIntegerValue] includeDefaultEntry:YES encodingPopUp:&encodingPopUp checkBox:&ignoreRichTextButton]];
     [ignoreRichTextButton setTitle:NSLocalizedString(@"Ignore rich text commands", @"Checkbox indicating that when opening a rich text file, the rich text should be ignored (causing the file to be loaded as plain text)")];
     [ignoreRichTextButton setToolTip:NSLocalizedString(@"If selected, HTML and RTF files will be loaded as plain text, allowing you to see and edit the HTML or RTF directives.", @"Tooltip for checkbox indicating that when opening a rich text file, the rich text should be ignored (causing the file to be loaded as plain text)")];
-    if (ignoreRich != ignoreHTML) {
+    if (ignoreRichOrig != ignoreHTMLOrig) {
 	[ignoreRichTextButton setAllowsMixedState:YES];
 	[ignoreRichTextButton setState:NSMixedState];
     } else {
 	if ([ignoreRichTextButton allowsMixedState]) [ignoreRichTextButton setAllowsMixedState:NO];
-	[ignoreRichTextButton setState:ignoreRich ? NSOnState : NSOffState];
+	[ignoreRichTextButton setState:ignoreRichOrig ? NSOnState : NSOffState];
     }
-    
-    result = [super runModalOpenPanel:openPanel forTypes:types];
-    if (result == NSOKButton) {
-	encoding = (NSStringEncoding)[[[encodingPopUp selectedItem] representedObject] unsignedIntegerValue];
-	NSInteger ignoreState = [ignoreRichTextButton state];
-	if (ignoreState != NSMixedState) {  // Mixed state indicates they were different, and to leave them alone
-	    ignoreHTML = ignoreRich = (ignoreState == NSOnState);
-	}
-        NSDictionary *options = [NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithUnsignedInteger:encoding], PlainTextEncodingForRead, [NSNumber numberWithBool:ignoreHTML], IgnoreHTML, [NSNumber numberWithBool:ignoreRich], IgnoreRichText, nil];
-        for (NSURL *url in [openPanel URLs]) {
-            [customOpenSettings setObject:options forKey:url];
+
+    [super beginOpenPanel:openPanel forTypes:types completionHandler:^(NSInteger result) {
+        if (result == NSOKButton) {
+            BOOL ignoreHTML = ignoreHTMLOrig;
+            BOOL ignoreRich = ignoreRichOrig;
+            NSUInteger encoding = (NSStringEncoding)[[[encodingPopUp selectedItem] representedObject] unsignedIntegerValue];
+            NSInteger ignoreState = [ignoreRichTextButton state];
+            if (ignoreState != NSMixedState) {  // Mixed state indicates they were different, and to leave them alone
+                ignoreHTML = ignoreRich = (ignoreState == NSOnState);
+            }
+            NSDictionary *options = [NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithUnsignedInteger:encoding], PlainTextEncodingForRead, [NSNumber numberWithBool:ignoreHTML], IgnoreHTML, [NSNumber numberWithBool:ignoreRich], IgnoreRichText, nil];
+            for (NSURL *url in [openPanel URLs]) {
+                [customOpenSettings setObject:options forKey:url];
+            }
         }
-    }
-    return result;
+        completionHandler(result);
+    }];
+    
 }
 
 - (NSStringEncoding)lastSelectedEncodingForURL:(NSURL *)url {
@@ -337,7 +348,7 @@
    -defaultType to return the appropriate type string. 
 */
 - (NSString *)defaultType {
-    return (NSString *)([[NSUserDefaults standardUserDefaults] boolForKey:RichText] ? kUTTypeRTF : kUTTypePlainText);
+    return (NSString *)([[NSUserDefaults standardUserDefaults] boolForKey:RichText] ? kUTTypeRTF : kUTTypeText);
 }
 
 @end

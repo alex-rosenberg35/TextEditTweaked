@@ -1,19 +1,32 @@
-{\rtf1\ansi\ansicpg1252\cocoartf1130
-\readonlydoc1{\fonttbl\f0\fswiss\fcharset0 Helvetica;\f1\fmodern\fcharset0 Courier;\f2\fnil\fcharset0 Monaco;
+{\rtf1\ansi\ansicpg1252\cocoartf1219\cocoasubrtf210
+{\fonttbl\f0\fswiss\fcharset0 Helvetica;\f1\fmodern\fcharset0 Courier;\f2\fnil\fcharset0 Monaco;
 }
 {\colortbl;\red255\green255\blue255;\red0\green116\blue0;\red92\green38\blue153;}
-\vieww12360\viewh9720\viewkind0
+\margl1440\margr1440\vieww16140\viewh14380\viewkind0
 \pard\tx960\tx1920\tx2880\tx3840\tx4800\tx5760\tx6720\tx7680\tx8640\tx9600
 
 \f0\b\fs48 \cf0 TextEdit\
 \pard\tx960\tx1920\tx2880\tx3840\tx4800\tx5760\tx6720\tx7680\tx8640\tx9600
 
 \b0\fs24 \cf0 \
-This directory contains the source code for the Objective-C version of TextEdit, which is a simple text editor based on the text system in Cocoa.\
+This directory contains the source code for the Objective-C version of TextEdit, which is a simple text editor based on the NSText and NSDocument subsystems of Cocoa.\
 \
 Scroll about halfway down this document for an overview of the source files in TextEdit.\
 \
 \
+\pard\tx960\tx1920\tx2880\tx3840\tx4800\tx5760\tx6720\tx7680\tx8640\tx9600\li140\fi-140
+
+\b\fs28 \cf0 Changes in TextEdit 1.8 (Zin):\
+\
+\pard\tx960\tx1920\tx2880\tx3840\tx4800\tx5760\tx6720\tx7680\tx8640\tx9600\li140\fi-140
+
+\b0\fs24 \cf0 \'95 By adopting the Ubiquity entitlement, TextEdit is now able to use iCloud document storage.  This is automatic for an Auto Save app like TextEdit; one change TextEdit had to do was to switch from overriding NSDocumentController's -runModalOpenPanel:forTypes: to -beginOpenPanel:forTypes:completionHandler:, in order enable NSDocument to present the open panel non-modally when appropriate.\
+\'95 TextEdit's nib files have now all been converted to use autolayout.\
+\'95 TextEdit adopts NSScrollView's zooming feature. This is active even in Wrap-to-Window mode.  In Wrap-to-Page mode, the zooming pop-up has been removed, which enables TextEdit to use overall scrollers. There is a new menu to control zooming level, or the user can just zoom in and out using magnify gestures.\
+\'95 For new rich text documents, TextEdit now uses fractional glyph advancements, rather than integral. The former provides for better looking text with more natural spacing, and is especially nicer looking in higher resolution modes.  TextEdit calls -[NSLayoutManager setUsesScreenFonts:] to change this setting. Documents coming from older OS X systems are still displayed using integral glyph advancements, for document compatibility.\
+\
+\pard\tx960\tx1920\tx2880\tx3840\tx4800\tx5760\tx6720\tx7680\tx8640\tx9600
+\cf0 \
 \pard\tx960\tx1920\tx2880\tx3840\tx4800\tx5760\tx6720\tx7680\tx8640\tx9600\li140\fi-140
 
 \b\fs28 \cf0 Changes in TextEdit 1.7 (Lion):\
@@ -157,7 +170,7 @@ Changes in TextEdit 1.4 (Tiger):\
 \'95 The untitled document which is brought up automatically when TextEdit is launched or brought forward will be closed if it is left untouched and the user opens another document. TextEdit currently does this itself (see the "transientDocument" code in Document.m), but it would be good to pull this into the AppKit at some point.\
 \'95 A few more encodings have been added to the default open panel encoding popup.\
 \'95 Changed app signature of TextEdit to 'ttxt', which matches that of SimpleText, so that old documents will open in TextEdit and not launch SimpleText in Classic. However, because screen grabs from Mac OS 9 have SimpleText's creator, also added code to recognize these files and pass them off to the user's default image viewer. \
-\'95 Fixed a bug in TextFinder.m where "replace all" could fail and raise if the search string occured multiple overlapping times in a selection; for instance, "aa" being replaced in the word "craaash".\
+\'95 Fixed a bug in TextFinder.m where "replace all" could fail and raise if the search string occurred multiple overlapping times in a selection; for instance, "aa" being replaced in the word "craaash".\
 \'95 Preferences object would always write the preferences out on quit, without checking to see if they actually changed. It now does a check.\
 \pard\tx960\tx1920\tx2880\tx3840\tx4800\tx5760\tx6720\tx7680\tx8640\tx9600\li140\fi-140
 
@@ -302,7 +315,7 @@ DocumentWindowController binds its layout manager's hyphenationFactor to documen
 
 \b0\fs24 \cf0 The method 
 \f1 textEditDoForegroundLayoutToCharacterIndex:
-\f0  shows how to get the text system to lay text out in the foreground up to a certain character location. By default the text system does its layout in the background, which allows bringing up the window fairly quickly. The user can even edit, print, or save the document while the background layout is going on. This method enables having the first portion of the document already laid out. Note that this was useful from a user point of view in Tiger, where the scrollbar for the document raced down the page as background layout happened, but it's less interesting in Leopard when non-contiguous background layout is enabled. However, we still do it, and this method is also ueful for when printing the document (since TextEdit doesn't rewrap or relayout when printing and just uses its existing layout into).\
+\f0  shows how to get the text system to lay text out in the foreground up to a certain character location. By default the text system does its layout in the background, which allows bringing up the window fairly quickly. The user can even edit, print, or save the document while the background layout is going on. This method enables having the first portion of the document already laid out. Note that this was useful from a user point of view in Tiger, where the scrollbar for the document raced down the page as background layout happened, but it's less interesting in Leopard when non-contiguous background layout is enabled. However, we still do it, and this method is also useful for when printing the document (since TextEdit doesn't rewrap or relayout when printing and just uses its existing layout into).\
 \
 This class implements a number of NSTextView, NSLayoutManager, and NSWindow delegate methods.  \
 \
@@ -411,7 +424,7 @@ Since
 \
 \pard\tx960\tx1920\tx2880\tx3840\tx4800\tx5760\tx6720\tx7680\tx8640\tx9600
 
-\b0\fs24 \cf0 This file provides the class EncodingManager, which does most of the sophisticed text encoding related stuff.  This class also manages a panel which lets the user customize the list of encodings available in the application.\
+\b0\fs24 \cf0 This file provides the class EncodingManager, which does most of the sophisticated text encoding related stuff.  This class also manages a panel which lets the user customize the list of encodings available in the application.\
 \
 In addition, EncodingManager provides the ability to load the accessory view used in open and save panels.\
 \

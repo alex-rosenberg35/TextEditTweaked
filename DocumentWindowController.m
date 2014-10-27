@@ -1,42 +1,51 @@
+
 /*
-        DocumentWindowController.m
-        Copyright (c) 1995-2011 by Apple Computer, Inc., all rights reserved.
-        Author: David Remahl, adapted from old Document.m
+     File: DocumentWindowController.m
+ Abstract: Document's main window controller object for TextEdit.
  
-        Document's main window controller object for TextEdit
-*/
-/*
- IMPORTANT:  This Apple software is supplied to you by Apple Computer, Inc. ("Apple") in
- consideration of your agreement to the following terms, and your use, installation, 
- modification or redistribution of this Apple software constitutes acceptance of these 
- terms.  If you do not agree with these terms, please do not use, install, modify or 
+  Version: 1.8
+ 
+ Disclaimer: IMPORTANT:  This Apple software is supplied to you by Apple
+ Inc. ("Apple") in consideration of your agreement to the following
+ terms, and your use, installation, modification or redistribution of
+ this Apple software constitutes acceptance of these terms.  If you do
+ not agree with these terms, please do not use, install, modify or
  redistribute this Apple software.
  
- In consideration of your agreement to abide by the following terms, and subject to these 
- terms, Apple grants you a personal, non-exclusive license, under Apple's copyrights in 
- this original Apple software (the "Apple Software"), to use, reproduce, modify and 
- redistribute the Apple Software, with or without modifications, in source and/or binary 
- forms; provided that if you redistribute the Apple Software in its entirety and without 
- modifications, you must retain this notice and the following text and disclaimers in all 
- such redistributions of the Apple Software.  Neither the name, trademarks, service marks 
- or logos of Apple Computer, Inc. may be used to endorse or promote products derived from 
- the Apple Software without specific prior written permission from Apple. Except as expressly
- stated in this notice, no other rights or licenses, express or implied, are granted by Apple
- herein, including but not limited to any patent rights that may be infringed by your 
- derivative works or by other works in which the Apple Software may be incorporated.
+ In consideration of your agreement to abide by the following terms, and
+ subject to these terms, Apple grants you a personal, non-exclusive
+ license, under Apple's copyrights in this original Apple software (the
+ "Apple Software"), to use, reproduce, modify and redistribute the Apple
+ Software, with or without modifications, in source and/or binary forms;
+ provided that if you redistribute the Apple Software in its entirety and
+ without modifications, you must retain this notice and the following
+ text and disclaimers in all such redistributions of the Apple Software.
+ Neither the name, trademarks, service marks or logos of Apple Inc. may
+ be used to endorse or promote products derived from the Apple Software
+ without specific prior written permission from Apple.  Except as
+ expressly stated in this notice, no other rights or licenses, express or
+ implied, are granted by Apple herein, including but not limited to any
+ patent rights that may be infringed by your derivative works or by other
+ works in which the Apple Software may be incorporated.
  
- The Apple Software is provided by Apple on an "AS IS" basis.  APPLE MAKES NO WARRANTIES, 
- EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION THE IMPLIED WARRANTIES OF NON-INFRINGEMENT, 
- MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE, REGARDING THE APPLE SOFTWARE OR ITS 
- USE AND OPERATION ALONE OR IN COMBINATION WITH YOUR PRODUCTS.
+ The Apple Software is provided by Apple on an "AS IS" basis.  APPLE
+ MAKES NO WARRANTIES, EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION
+ THE IMPLIED WARRANTIES OF NON-INFRINGEMENT, MERCHANTABILITY AND FITNESS
+ FOR A PARTICULAR PURPOSE, REGARDING THE APPLE SOFTWARE OR ITS USE AND
+ OPERATION ALONE OR IN COMBINATION WITH YOUR PRODUCTS.
  
- IN NO EVENT SHALL APPLE BE LIABLE FOR ANY SPECIAL, INDIRECT, INCIDENTAL OR CONSEQUENTIAL 
- DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS 
- OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) ARISING IN ANY WAY OUT OF THE USE, 
- REPRODUCTION, MODIFICATION AND/OR DISTRIBUTION OF THE APPLE SOFTWARE, HOWEVER CAUSED AND 
- WHETHER UNDER THEORY OF CONTRACT, TORT (INCLUDING NEGLIGENCE), STRICT LIABILITY OR 
- OTHERWISE, EVEN IF APPLE HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-*/
+ IN NO EVENT SHALL APPLE BE LIABLE FOR ANY SPECIAL, INDIRECT, INCIDENTAL
+ OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ INTERRUPTION) ARISING IN ANY WAY OUT OF THE USE, REPRODUCTION,
+ MODIFICATION AND/OR DISTRIBUTION OF THE APPLE SOFTWARE, HOWEVER CAUSED
+ AND WHETHER UNDER THEORY OF CONTRACT, TORT (INCLUDING NEGLIGENCE),
+ STRICT LIABILITY OR OTHERWISE, EVEN IF APPLE HAS BEEN ADVISED OF THE
+ POSSIBILITY OF SUCH DAMAGE.
+ 
+ Copyright (C) 2013 Apple Inc. All Rights Reserved.
+ 
+ */
 
 #import "DocumentWindowController.h"
 #import "Document.h"
@@ -44,7 +53,6 @@
 #import "TextEditDefaultsKeys.h"
 #import "TextEditMisc.h"
 #import "TextEditErrors.h"
-#import "JJTypesetter.h"
 
 @interface DocumentWindowController(Private)
 
@@ -53,10 +61,11 @@
 - (void)setupInitialTextViewSharedState;
 - (void)setupTextViewForDocument;
 - (void)setupWindowForDocument;
-- (void)updateForRichTextAndRulerState;
 - (void)setupPagesViewForLayoutOrientation:(NSTextLayoutOrientation)orientation;
 
-- (void)doToggleRichAfterSaving;
+- (void)updateForRichTextAndRulerState:(BOOL)rich;
+- (void)autosaveIfNeededThenToggleRich;
+- (void)toggleRichWithNewFileType:(NSString *)fileType;
 
 - (void)showRulerDelayed:(BOOL)flag;
 
@@ -120,21 +129,17 @@
     }
     if (oldDoc != doc) {
 	if (oldDoc) {
-	    /* Remove layout manager from the old Document's text storage. No need to retain as we already own the object. */
+            /* Remove layout manager from the old Document's text storage. No need to retain as we already own the object. */
 	    [[oldDoc textStorage] removeLayoutManager:layoutMgr];
 	    
 	    [oldDoc removeObserver:self forKeyPath:@"printInfo"];
 	    [oldDoc removeObserver:self forKeyPath:@"richText"];
-            [oldDoc removeObserver:self forKeyPath:@"viewSize"];
+	    [oldDoc removeObserver:self forKeyPath:@"viewSize"];
 	    [oldDoc removeObserver:self forKeyPath:@"hasMultiplePages"];
 	}
 	
 	if (doc) {
-        JJTypesetter *typesetter = [[JJTypesetter alloc] init];
-        [typesetter setEnabled: [doc isRichText] ? NO : YES];
-        [layoutMgr setTypesetter:typesetter];
-        [[doc textStorage] addLayoutManager:layoutMgr];
-        [typesetter release];
+            [[doc textStorage] addLayoutManager:layoutMgr];
 	    
 	    if ([self isWindowLoaded]) {
                 [self setHasMultiplePages:[doc hasMultiplePages] force:NO];
@@ -215,10 +220,6 @@
     } else if (object == [self document]) {
 	if ([keyPath isEqualToString:@"printInfo"]) {
 	    [self printInfoUpdated];
-	} else if ([keyPath isEqualToString:@"richText"]) {
-            if ([self isWindowLoaded]) {
-                [self updateForRichTextAndRulerState];
-            }
 	} else if ([keyPath isEqualToString:@"viewSize"]) {
 	    if (!isSettingSize) {
 		NSSize size = [[self document] viewSize];
@@ -235,28 +236,29 @@
 - (void)setupTextViewForDocument {
     Document *doc = [self document];
     NSArray *sections = [doc originalOrientationSections];
-    NSTextLayoutOrientation orientattion = NSTextLayoutOrientationHorizontal;
+    NSTextLayoutOrientation orientation = NSTextLayoutOrientationHorizontal;
     BOOL rich = [doc isRichText];
     
     if (doc && (!rich || [[[self firstTextView] textStorage] length] == 0)) [[self firstTextView] setTypingAttributes:[doc defaultTextAttributes:rich]];
-    [self updateForRichTextAndRulerState];
+    [self updateForRichTextAndRulerState:rich];
     
     [[self firstTextView] setBackgroundColor:[doc backgroundColor]];
-    
+    [[[self firstTextView] layoutManager] setUsesScreenFonts:[doc usesScreenFonts]];
+
     // process the initial container
     if ([sections count] > 0) {
         for (NSDictionary *dict in sections) {
             id rangeValue = [dict objectForKey:NSTextLayoutSectionRange];
             
             if (!rangeValue || NSLocationInRange(0, [rangeValue rangeValue])) {
-                orientattion = NSTextLayoutOrientationVertical;
-                [[self firstTextView] setLayoutOrientation:orientattion];
+                orientation = NSTextLayoutOrientationVertical;
+                [[self firstTextView] setLayoutOrientation:orientation];
                 break;
             }
         }
     }
 
-    if (hasMultiplePages && (orientattion != NSTextLayoutOrientationHorizontal)) [self setupPagesViewForLayoutOrientation:orientattion];
+    if (hasMultiplePages && (orientation != NSTextLayoutOrientationHorizontal)) [self setupPagesViewForLayoutOrientation:orientation];
 }
 
 - (void)printInfoUpdated {
@@ -321,7 +323,14 @@
 
 /* This method implements panel-based "attach" functionality. Note that as-is, it's set to accept all files; however, by setting allowed types on the open panel it can be restricted to images, etc.
 */
+
+- (void)presenterDidPresent:(BOOL)inDidSucceed soContinue:(void (^)(BOOL didSucceed))inContinuerCopy {
+    inContinuerCopy(inDidSucceed);
+    Block_release(inContinuerCopy);
+}
+
 - (void)chooseAndAttachFiles:(id)sender {
+    [[self document] performActivityWithSynchronousWaiting:YES usingBlock:^(void (^activityCompletionHandler)(void)) {
     NSOpenPanel *panel = [NSOpenPanel openPanel];
     [panel setCanChooseDirectories:YES];
     [panel setAllowsMultipleSelection:YES];
@@ -366,26 +375,30 @@
 		    NSString *description = (numberOfErrors == [urls count]) ? NSLocalizedString(@"None of the items could be attached.", @"Title of alert indicating error during 'Attach Files...' when user tries to attach (insert) multiple files and none can be attached.") : NSLocalizedString(@"Some of the items could not be attached.", @"Title of alert indicating error during 'Attach Files...' when user tries to attach (insert) multiple files and some fail.");
 		    error = [NSError errorWithDomain:TextEditErrorDomain code:TextEditAttachFilesFailure userInfo:[NSDictionary dictionaryWithObjectsAndKeys:description, NSLocalizedDescriptionKey, NSLocalizedString(@"The files may be unreadable, or the volume they are on may be inaccessible. Please check in Finder.", @"Recommendation when 'Attach Files...' command fails"), NSLocalizedRecoverySuggestionErrorKey, nil]];
 		}
-		[[self window] presentError:error modalForWindow:[self window] delegate:nil didPresentSelector:NULL contextInfo:NULL];
+                    [[self window] presentError:error modalForWindow:[self window] delegate:self didPresentSelector:@selector(presenterDidPresent:soContinue:) contextInfo:Block_copy(^(BOOL didSucceed) {
+                        activityCompletionHandler();
+                    })];
+                } else {
+                    activityCompletionHandler();
 	    }
+            } else {
+                activityCompletionHandler();
 	}
+    }];
     }];
 }
 
 
-/* Doesn't check to see if the prev value is the same --- Otherwise the first time doesn't work...
-attachmentFlag allows for optimizing some cases where we know we have no attachments, so we don't need to scan looking for them.
-*/
-- (void)updateForRichTextAndRulerState {
+/* Doesn't check to see if the prev value is the same --- Otherwise the first time doesn't work... */
+- (void)updateForRichTextAndRulerState:(BOOL)rich {
     NSTextView *view = [self firstTextView];
-    BOOL rich = [[self document] isRichText];
-    
     [view setRichText:rich];
     [view setUsesRuler:rich];	// If NO, this correctly gets rid of the ruler if it was up
     [view setUsesInspectorBar:rich];
     if (!rich && rulerIsBeingDisplayed) [self showRulerDelayed:NO];	// Cancel delayed ruler request
     if (rich && ![[self document] isReadOnly]) [self showRulerDelayed:YES];
     [view setImportsGraphics:rich];
+    [[view layoutManager] setUsesScreenFonts:rich ? NO : YES];
 }
 
 - (void)configureTypingAttributesAndDefaultParagraphStyleForTextView:(NSTextView *)view {
@@ -398,10 +411,9 @@ attachmentFlag allows for optimizing some cases where we know we have no attachm
     [view setDefaultParagraphStyle:paragraphStyle];
 }
 
-- (void)convertTextForRichTextStateRemoveAttachments:(BOOL)attachmentFlag {
+- (void)convertTextForRichTextState:(BOOL)rich removeAttachments:(BOOL)attachmentFlag {
     NSTextView *view = [self firstTextView];
     Document *doc = [self document];
-    BOOL rich = [doc isRichText];
     NSDictionary *textAttributes = [doc defaultTextAttributes:rich];
     NSParagraphStyle *paragraphStyle = [textAttributes objectForKey:NSParagraphStyleAttributeName];
     
@@ -540,7 +552,7 @@ attachmentFlag allows for optimizing some cases where we know we have no attachm
         [[self firstTextView] scrollRangeToVisible:[[self firstTextView] selectedRange]];
 	
         NSRect visRect = [pagesView visibleRect];
-	NSRect pageRect = [pagesView pageRectForPageNumber:0];
+        NSRect pageRect = [pagesView pageRectForPageNumber:0];
         if (visRect.size.width < pageRect.size.width) {	// If we can't show the whole page, tweak a little further
             NSRect docRect = [pagesView documentRectForPageNumber:0];
             if (visRect.size.width >= docRect.size.width) {	// Center document area in window
@@ -572,7 +584,7 @@ attachmentFlag allows for optimizing some cases where we know we have no attachm
         [textContainer setHeightTracksTextView:NO];		/* Not really necessary */
         [textView setHorizontallyResizable:NO];			/* Not really necessary */
         [textView setVerticallyResizable:YES];
-	[textView setAutoresizingMask:NSViewWidthSizable];
+        [textView setAutoresizingMask:NSViewWidthSizable];
         [textView setMinSize:size];	/* Not really necessary; will be adjusted by the autoresizing... */
         [textView setMaxSize:NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX)];	/* Will be adjusted by the autoresizing... */  
         [self configureTypingAttributesAndDefaultParagraphStyleForTextView:textView];
@@ -581,8 +593,9 @@ attachmentFlag allows for optimizing some cases where we know we have no attachm
 
         /* The next line should cause the multiple page view and everything else to go away */
         [scrollView setDocumentView:textView];
-        [scrollView setHasHorizontalScroller:((orientation == NSTextLayoutOrientationHorizontal) ? NO : YES)];
-        [scrollView setHasVerticalScroller:((orientation == NSTextLayoutOrientationHorizontal) ? YES : NO)];
+
+        [scrollView setHasVerticalScroller:YES];
+        [scrollView setHasHorizontalScroller:YES];
 
         [textView release];
         [textContainer release];
@@ -651,16 +664,16 @@ attachmentFlag allows for optimizing some cases where we know we have no attachm
 	    [self resizeWindowForViewSize:[[scrollView documentView] pageRectForPageNumber:0].size];
 	} else {
             NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-	    NSInteger windowHeight = [defaults integerForKey:WindowHeight];
-	    NSInteger windowWidth = [defaults integerForKey:WindowWidth];
-	    NSFont *font = [[self document] isRichText] ? [NSFont userFontOfSize:0.0] : [NSFont userFixedPitchFontOfSize:0.0];
+            NSInteger windowHeight = [defaults integerForKey:WindowHeight];
+            NSInteger windowWidth = [defaults integerForKey:WindowWidth];
+            NSFont *font = [[self document] isRichText] ? [NSFont userFontOfSize:0.0] : [[NSFont userFixedPitchFontOfSize:0.0] screenFontWithRenderingMode:NSFontDefaultRenderingMode];
             NSSize size;
             size.height = ceil([[self layoutManager] defaultLineHeightForFont:font] * windowHeight);
             size.width = [@"x" sizeWithAttributes:[NSDictionary dictionaryWithObject:font forKey:NSFontAttributeName]].width;
             if (size.width == 0.0) size.width = [@" " sizeWithAttributes:[NSDictionary dictionaryWithObject:font forKey:NSFontAttributeName]].width; /* try for space width */
             if (size.width == 0.0) size.width = [font maximumAdvancement].width; /* or max width */
-	    size.width  = ceil(size.width * windowWidth);
-	    [self resizeWindowForViewSize:size];
+            size.width  = ceil(size.width * windowWidth);
+            [self resizeWindowForViewSize:size];
 	}
     }
 }
@@ -731,53 +744,82 @@ attachmentFlag allows for optimizing some cases where we know we have no attachm
     return sections;
 }
 
-- (void)setRichText:(BOOL)richText {
-    Document *doc = [self document];
-    NSUndoManager *undoMgr = [doc undoManager];
-    [[undoMgr prepareWithInvocationTarget:self] setRichText:!richText];
+- (void)toggleRichWithNewFileType:(NSString *)type {
+    Document *document = [self document];
+    NSURL *fileURL = [document fileURL];
+    BOOL isRich = [document isRichText];    // This is the old value
     
-    [doc setRichText:richText];
-    [self convertTextForRichTextStateRemoveAttachments:!richText];
+    NSUndoManager *undoManager = [document undoManager];
+    [undoManager beginUndoGrouping];
     
-    if ([undoMgr isUndoing]) {
-        [undoMgr setActionName:@""];
+    NSString *undoType = (NSString *)((isRich) ? (([[[self firstTextView] textStorage] containsAttachments] || [[document fileType] isEqualToString:(NSString *)kUTTypeRTFD]) ? kUTTypeRTFD : kUTTypeRTF) : kUTTypePlainText);
+    
+    [undoManager registerUndoWithTarget:self selector:_cmd object:undoType];
+    
+    [document setUsesScreenFonts:isRich];
+    [self updateForRichTextAndRulerState:!isRich];
+    [self convertTextForRichTextState:!isRich removeAttachments:isRich];
+    
+    if (isRich) {
+        [document clearDocumentProperties];
     } else {
-        [undoMgr setActionName:richText ? NSLocalizedString(@"Make Rich Text", @"Undo menu item text (without 'Undo ') for making a document rich text") : NSLocalizedString(@"Make Plain Text", @"Undo menu item text (without 'Undo ') for making a document plain text")];
+        [document setDocumentPropertiesToDefaults];
+    }
+    
+    [undoManager setActionName:([undoManager isUndoing] ^ isRich) ? NSLocalizedString(@"Make Plain Text", @"Undo menu item text (without 'Undo ') for making a document plain text") : NSLocalizedString(@"Make Rich Text", @"Undo menu item text (without 'Undo ') for making a document rich text")];
+    
+    [undoManager endUndoGrouping];
+    
+    if (type == nil) type = (NSString *)(isRich ? kUTTypePlainText : kUTTypeRTF);
+    
+    if (fileURL) {
+        [document saveToURL:fileURL ofType:type forSaveOperation:NSAutosaveInPlaceOperation completionHandler:^(NSError *error) {
+            if (error) {
+                [document setFileURL:nil];
+                [document setFileType:type];
+            }
+        }];
+    } else {
+        [document setFileType:type];
+    }
+}
+
+- (void)autosaveIfNeededThenToggleRich {
+    Document *document = [self document];
+    
+    if ([document fileURL] && [document isDocumentEdited]) {
+        [document autosaveWithImplicitCancellability:NO completionHandler:^(NSError *error) {
+            if (!error) [self toggleRichWithNewFileType:nil];
+        }];
+    } else {
+        [self toggleRichWithNewFileType:nil];
     }
 }
 
 /* toggleRich: puts up an alert before ultimately calling -setRichText:
 */
 - (void)toggleRich:(id)sender {
+    Document *document = [self document];
     // Check if there is any loss of information
-    if ([[self document] toggleRichWillLoseInformation]) {
+    if ([document toggleRichWillLoseInformation]) {
+        [document performActivityWithSynchronousWaiting:YES usingBlock:^(void (^activityCompletionHandler)(void)) {
         NSBeginAlertSheet(NSLocalizedString(@"Convert this document to plain text?", @"Title of alert confirming Make Plain Text"),
 			  NSLocalizedString(@"OK", @"OK"), NSLocalizedString(@"Cancel", @"Button choice that allows the user to cancel."), nil, [[self document] windowForSheet], 
-			  self, NULL, @selector(didEndToggleRichSheet:returnCode:contextInfo:), NULL,
+                              self, NULL, @selector(didEndToggleRichSheet:returnCode:contextInfo:),
+                                Block_copy(^(void) {
+                                    activityCompletionHandler();
+                                }),
 			  NSLocalizedString(@"Making a rich text document plain will lose all text styles (such as fonts and colors), images, attachments, and document properties.", @"Subtitle of alert confirming Make Plain Text"));
+        }];
     } else {
-        [self doToggleRichAfterSaving];
+        [self autosaveIfNeededThenToggleRich];
     }
 }
 
-- (void)didEndToggleRichSheet:(NSWindow *)sheet returnCode:(NSInteger)returnCode contextInfo:(void *)contextInfo {
-    if (returnCode == NSAlertDefaultReturn) [self doToggleRichAfterSaving];
-}
-
-/* An intermediary which causes the document to be saved before toggling rich state, if the document exists in the filesystem.
-*/
-- (void)doToggleRichAfterSaving {
-    Document *document = [self document];
-    if ([document fileURL] && [document isDocumentEdited]) {
-        [document autosaveDocumentWithDelegate:self didAutosaveSelector:@selector(document:didAutosave:contextInfo:) contextInfo:NULL];
-    } else {
-        [self setRichText:![[self document] isRichText]];
-    }
-}
-
-- (void)document:(Document *)document didAutosave:(BOOL)saved contextInfo:(void *)contextInfo {
-    // If the save was unsuccessful, then we don't toggle the document format
-    if (saved) [self setRichText:![[self document] isRichText]];
+- (void)didEndToggleRichSheet:(NSWindow *)sheet returnCode:(NSInteger)returnCode contextInfo:(void (^)(void))block {
+    if (returnCode == NSAlertDefaultReturn) [self autosaveIfNeededThenToggleRich];
+    block();
+    Block_release(block);
 }
 
 /* Layout orientation
@@ -860,7 +902,11 @@ attachmentFlag allows for optimizing some cases where we know we have no attachm
         if ([linkURL isFileURL]) {
 	    NSError *error;
             if (![linkURL checkResourceIsReachableAndReturnError:&error]) {	// To be able to present an error panel, see if the file is reachable
-		[[self window] presentError:error modalForWindow:[self window] delegate:nil didPresentSelector:NULL contextInfo:NULL];
+                [[self document] performActivityWithSynchronousWaiting:YES usingBlock:^(void (^activityCompletionHandler)(void)) {
+                    [[self window] presentError:error modalForWindow:[self window] delegate:self didPresentSelector:@selector(presenterDidPresent:soContinue:) contextInfo:Block_copy(^(BOOL didSucceed) {
+                        activityCompletionHandler();
+                    })];
+                }];
 		return YES;
 	    } else {
                 // Special case: We want to open text types in TextEdit, as presumably that is what was desired

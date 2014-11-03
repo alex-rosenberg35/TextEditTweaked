@@ -3,7 +3,7 @@
      File: DocumentWindowController.m
  Abstract: Document's main window controller object for TextEdit.
  
-  Version: 1.8
+  Version: 1.9
  
  Disclaimer: IMPORTANT:  This Apple software is supplied to you by Apple
  Inc. ("Apple") in consideration of your agreement to the following
@@ -773,17 +773,22 @@
     if (type == nil) type = (NSString *)(isRich ? kUTTypePlainText : kUTTypeRTF);
     
     if (fileURL) {
-        [document saveToURL:fileURL ofType:type forSaveOperation:NSAutosaveInPlaceOperation completionHandler:^(NSError *error) {
-            if (error) {
-                [document setFileURL:nil];
-                [document setFileType:type];
-            }
-        }];
+
+        // Synchronously calling a method that invokes -performAsynchronousFileAccessUsingBlock: (like -saveToURL:ofType:forSaveOperation:completionHandler:) in the completion handler of method that uses -continueAsynchronousWorkOnMainThreadUsingBlock: to invoke its completion handler on the main thread (like -autosaveWithImplicitCancellability:completionHandler:, used in -toggleRich:) triggers a bug in NSdocument where the -performAsynchronousFileAccessUsingBlock: invocation has no effect besides invoking its block. This can potentially result in two 'file access' blocks being invoked at the same time, which breaks the contract.
+        CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopDefaultMode, ^{
+            [document saveToURL:fileURL ofType:type forSaveOperation:NSAutosaveInPlaceOperation completionHandler:^(NSError *error) {
+                if (error) {
+                    [document setFileURL:nil];
+                    [document setFileType:type];
+                }
+            }];
+        });
     } else {
         [document setFileType:type];
     }
 }
 
+/*
 - (void)autosaveIfNeededThenToggleRich {
     Document *document = [self document];
     
@@ -796,29 +801,70 @@
     }
 }
 
-/* toggleRich: puts up an alert before ultimately calling -setRichText:
-*/
 - (void)toggleRich:(id)sender {
     Document *document = [self document];
     // Check if there is any loss of information
     if ([document toggleRichWillLoseInformation]) {
         [document performActivityWithSynchronousWaiting:YES usingBlock:^(void (^activityCompletionHandler)(void)) {
         NSBeginAlertSheet(NSLocalizedString(@"Convert this document to plain text?", @"Title of alert confirming Make Plain Text"),
-			  NSLocalizedString(@"OK", @"OK"), NSLocalizedString(@"Cancel", @"Button choice that allows the user to cancel."), nil, [[self document] windowForSheet], 
+                         NSLocalizedString(@"OK", @"OK"), NSLocalizedString(@"Cancel", @"Button choice that allows the user to cancel."), nil, [[self document] windowForSheet],
                               self, NULL, @selector(didEndToggleRichSheet:returnCode:contextInfo:),
                                 Block_copy(^(void) {
                                     activityCompletionHandler();
                                 }),
-			  NSLocalizedString(@"Making a rich text document plain will lose all text styles (such as fonts and colors), images, attachments, and document properties.", @"Subtitle of alert confirming Make Plain Text"));
+                         NSLocalizedString(@"Making a rich text document plain will lose all text styles (such as fonts and colors), images, attachments, and document properties.", @"Subtitle of alert confirming Make Plain Text"));
         }];
     } else {
         [self autosaveIfNeededThenToggleRich];
     }
 }
+*/
 
-- (void)didEndToggleRichSheet:(NSWindow *)sheet returnCode:(NSInteger)returnCode contextInfo:(void (^)(void))block {
-    if (returnCode == NSAlertDefaultReturn) [self autosaveIfNeededThenToggleRich];
-    block();
+/* toggleRich: puts up an alert before ultimately calling -setRichText:
+*/
+- (void)toggleRich:(id)sender {
+    Document *document = [self document];
+    [document performActivityWithSynchronousWaiting:YES usingBlock:^(void (^activityCompletionHandler)(void)) {
+
+        // What we'll do to cause the document to toggle rich, after maybe showing an alert about loss of information.
+        void (^continueTogglingRich)(void) = ^{
+            [document autosaveWithImplicitCancellability:NO completionHandler:^(NSError *error) {
+                if (!error) {
+                    [self toggleRichWithNewFileType:nil];
+                }
+                activityCompletionHandler();
+            }];
+
+        };
+
+        // Check if there is any loss of information, waiting for any previous saves (which might be changing the type) to complete.
+        __block BOOL willLoseInformation = NO;
+        [document performSynchronousFileAccessUsingBlock:^{
+            willLoseInformation = [document toggleRichWillLoseInformation];
+        }];
+        if (willLoseInformation) {
+            NSString *messageText = NSLocalizedString(@"Convert this document to plain text?", @"Title of alert confirming Make Plain Text");
+            NSString *defaultButton = NSLocalizedString(@"OK", @"OK");
+            NSString *alternateButton = NSLocalizedString(@"Cancel", @"Button choice that allows the user to cancel.");
+            NSString *informativeText = NSLocalizedString(@"Making a rich text document plain will lose all text styles (such as fonts and colors), images, attachments, and document properties.", @"Subtitle of alert confirming Make Plain Text");
+            NSAlert *alert = [NSAlert alertWithMessageText:messageText defaultButton:defaultButton alternateButton:alternateButton otherButton:nil informativeTextWithFormat:@"%@", informativeText];
+            [alert beginSheetModalForWindow:[[self document] windowForSheet] modalDelegate:self didEndSelector:@selector(didEndToggleRichSheet:returnCode:contextInfo:) contextInfo:Block_copy(^(BOOL okToToggleRich){
+                if (okToToggleRich) {
+                    continueTogglingRich();
+                } else {
+                    activityCompletionHandler();
+                }
+            })];
+        } else {
+            continueTogglingRich();
+        }
+
+    }];
+}
+
+- (void)didEndToggleRichSheet:(NSWindow *)sheet returnCode:(NSInteger)returnCode contextInfo:(void (^)(BOOL))block {
+    // if (returnCode == NSAlertDefaultReturn) [self autosaveIfNeededThenToggleRich];
+    block(returnCode == NSAlertDefaultReturn);
     Block_release(block);
 }
 

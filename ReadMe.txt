@@ -1,7 +1,6 @@
 TextEdit
 
-This directory contains the source code for the Objective-C version of TextEdit, which is a simple text editor based on the NSText and NSDocument subsystems of Cocoa.
-
+This directory contains the source code for the TextEdit application. TextEdit is a simple text editor based on the NSText and NSDocument subsystems of Cocoa.
 
 Major source files and what's interesting about them:
 
@@ -23,7 +22,8 @@ There are also document properties that are settable by the user, such as author
 
 In order to enable these properties to be undoable, Document implements setValue:forDocumentProperty:.  This is called from the standard KVC method setValue:forKey: for properties we want to be undoable. By registering setValue:forDocumentProperty: as the callback in NSUndoManager, we workaround the NSUndoManager bug where prepareWithInvocationTarget: fails to freeze-dry invocations with "known" methods such as setValue:forKey:.
 
-Note the "trick" of providing string localizations in comments as a way to get genstrings to pick up the localizations when there are actually no explicit corresponding calls to NSLocalizedString and variants in the code. This allows us to provide menu titles for changes to document properties.  (Search for "For genstrings".)
+Note the "trick"  of providing string localizations in comments as a way to get genstrings to pick up the localizations when there are actually no 
+explicit corresponding calls to NSLocalizedString and variants in the code. This allows us to provide menu titles for changes to document properties.  (Search for "For genstrings".)
 
 Override of printOperationWithSettings:error: enables TextEdit to customize its printing by first making sure the text for the whole document is laid out before printing, and by adding an print accessory view to control whether pages should be numbered or not.
 
@@ -48,7 +48,7 @@ DocumentWindowController binds its layout manager's hyphenationFactor to documen
 
 setHasMultiplePages: determines whether the document is in wrap-to-page mode or not; study this method, addPage, and removePage to see how to create and manipulate NSTextViews programmatically.
 
-The method textEditDoForegroundLayoutToCharacterIndex: shows how to get the text system to lay text out in the foreground up to a certain character location. By default the text system does its layout in the background, which allows bringing up the window fairly quickly. The user can even edit, print, or save the document while the background layout is going on. This method enables having the first portion of the document already laid out. Note that this was useful from a user point of view in Tiger, where the scrollbar for the document raced down the page as background layout happened, but it's less interesting in Leopard when non-contiguous background layout is enabled. However, we still do it, and this method is also useful for when printing the document (since TextEdit doesn't rewrap or relayout when printing and just uses its existing layout into).
+The method textEditDoForegroundLayoutToCharacterIndex: shows how to get the text system to lay text out in the foreground up to a certain character location. By default the text system does its layout in the background, which allows bringing up the window fairly quickly. The user can even edit, print, or save the document while the background layout is going on. This method enables having the first portion of the document already laid out. Note that this was useful from a user point of view in Tiger, where the scrollbar for the document raced down the page as background layout happened, but it's less interesting in Leopard when non-contiguous background layout is enabled. However, we still do it, and this method is also ueful for when printing the document (since TextEdit doesn't rewrap or relayout when printing and just uses its existing layout into).
 
 This class implements a number of NSTextView, NSLayoutManager, and NSWindow delegate methods.  
 
@@ -106,7 +106,7 @@ Since openFile:userData:error: may be given arbitrary text as file names, it doe
 
 EncodingManager.m
 
-This file provides the class EncodingManager, which does most of the sophisticated text encoding related stuff.  This class also manages a panel which lets the user customize the list of encodings available in the application.
+This file provides the class EncodingManager, which does most of the sophisticed text encoding related stuff.  This class also manages a panel which lets the user customize the list of encodings available in the application.
 
 In addition, EncodingManager provides the ability to load the accessory view used in open and save panels.
 
